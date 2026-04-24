@@ -1,63 +1,83 @@
 import os
 import time
+import datetime
+import hashlib
 import anthropic
 import requests
 
-ANTHROPIC_API_KEY = os.environ["ANTHROPIC_API_KEY"]
 THREADS_ACCESS_TOKEN = os.environ["THREADS_ACCESS_TOKEN"]
 THREADS_USER_ID = os.environ["THREADS_USER_ID"]
 
 THREADS_BASE_URL = "https://graph.threads.net/v1.0"
 
-TOPICS = [
-    "生成AIの仕組み（大規模言語モデルとは何か）",
-    "プロンプトエンジニアリングの基本テクニック",
-    "ChatGPTとClaude、Geminiの違いと使い分け",
-    "AIが画像を生成する仕組み（Stable Diffusionなど）",
-    "機械学習と深層学習の違いをわかりやすく解説",
-    "AIによる音楽・動画生成の最前線",
-    "RAGとは何か？AIに最新情報を与える技術",
-    "エージェントAIとは何か？自律的に動くAIの仕組み",
-    "量子コンピュータがAIに与える影響",
-    "AIと著作権・倫理の問題をやさしく解説",
-    "ベクトルデータベースとは？AI検索の仕組み",
-    "ファインチューニングとは？AIを専門家にする方法",
-    "MCPとは何か？AIがツールを使う新しい仕組み",
-    "マルチモーダルAIとは？テキスト以外を理解するAI",
-    "AIのハルシネーション（幻覚）とその対策",
+SEARCH_QUERIES = [
+    "AI 最新ニュース 2026",
+    "ChatGPT 新機能 最新情報",
+    "Claude AI 最新アップデート",
+    "生成AI ビジネス活用 トレンド",
+    "AI 副業 稼ぎ方 最新",
+    "画像生成AI 最新モデル",
+    "AI エージェント 最新動向",
+    "Google Gemini 最新情報",
+    "AI 音楽生成 最新ツール",
+    "プロンプトエンジニアリング 最新テクニック",
+    "RAG LLM 最新技術",
+    "MCP AI ツール連携 最新",
+    "マルチモーダルAI 最新モデル",
+    "AI 規制 倫理 最新ニュース",
+    "ファインチューニング 最新手法",
 ]
 
-import datetime
-import hashlib
 
-def pick_topic():
+def pick_search_query() -> str:
     today = datetime.date.today()
-    idx = int(hashlib.md5(str(today).encode()).hexdigest(), 16) % len(TOPICS)
-    return TOPICS[idx]
+    idx = int(hashlib.md5(str(today).encode()).hexdigest(), 16) % len(SEARCH_QUERIES)
+    return SEARCH_QUERIES[idx]
 
 
-def generate_post(topic: str) -> str:
-    client = anthropic.Anthropic(api_key=ANTHROPIC_API_KEY)
+def generate_post_with_web_search() -> str:
+    # ANTHROPIC_API_KEY は環境変数から自動読み込み（GitHub Actions Secrets）
+    client = anthropic.Anthropic()
 
-    response = client.messages.create(
-        model="claude-opus-4-6",
-        max_tokens=1024,
-        messages=[
-            {
-                "role": "user",
-                "content": (
-                    f"Threadsに投稿する、AIやテクノロジーの初心者向け解説を日本語で書いてください。\n\n"
-                    f"テーマ：{topic}\n\n"
-                    f"要件：\n"
-                    f"- 500文字以内\n"
-                    f"- 読みやすく、わかりやすい言葉を使う\n"
-                    f"- 最後に関連する絵文字を1〜3個つける\n"
-                    f"- ハッシュタグは不要\n"
-                    f"- 本文のみを出力し、前置き・説明・マークダウンは不要\n"
-                ),
-            }
-        ],
-    )
+    query = pick_search_query()
+    print(f"検索クエリ: {query}")
+
+    messages = [
+        {
+            "role": "user",
+            "content": (
+                f"「{query}」で検索して最新情報を収集してください。"
+                f"その内容をもとに、Threadsに投稿する初心者向けのAI解説を日本語で書いてください。\n\n"
+                f"要件：\n"
+                f"- 500文字以内\n"
+                f"- 「今話題の〇〇について解説します」のように時事性のある書き出し\n"
+                f"- 最新ニュースや動向を1つ取り上げ、初心者にわかりやすく解説\n"
+                f"- 最後に関連する絵文字を1〜3個つける\n"
+                f"- ハッシュタグは不要\n"
+                f"- 投稿本文のみを出力し、前置き・説明・マークダウンは不要\n"
+            ),
+        }
+    ]
+
+    # web_search はサーバーサイドで自動実行される
+    while True:
+        response = client.messages.create(
+            model="claude-sonnet-4-20250514",
+            max_tokens=1024,
+            tools=[{"type": "web_search_20250305", "name": "web_search"}],
+            messages=messages,
+        )
+
+        if response.stop_reason == "end_turn":
+            break
+
+        # サーバー側ループ上限到達時は会話を続けて再リクエスト
+        if response.stop_reason == "pause_turn":
+            messages.append({"role": "assistant", "content": response.content})
+            continue
+
+        # 通常はここに到達しないが念のため
+        break
 
     text = next(
         (block.text for block in response.content if block.type == "text"), ""
@@ -74,8 +94,7 @@ def create_threads_container(text: str) -> str:
     }
     response = requests.post(url, params=params)
     response.raise_for_status()
-    data = response.json()
-    return data["id"]
+    return response.json()["id"]
 
 
 def publish_threads_post(creation_id: str) -> str:
@@ -86,18 +105,13 @@ def publish_threads_post(creation_id: str) -> str:
     }
     response = requests.post(url, params=params)
     response.raise_for_status()
-    data = response.json()
-    return data["id"]
+    return response.json()["id"]
 
 
 def main():
-    print("投稿テーマを選択中...")
-    topic = pick_topic()
-    print(f"テーマ: {topic}")
-
-    print("投稿文を生成中...")
-    post_text = generate_post(topic)
-    print(f"生成された投稿文（{len(post_text)}文字）:\n{post_text}\n")
+    print("最新情報をWeb検索しながら投稿文を生成中...")
+    post_text = generate_post_with_web_search()
+    print(f"\n生成された投稿文（{len(post_text)}文字）:\n{post_text}\n")
 
     print("Threadsコンテナを作成中...")
     creation_id = create_threads_container(post_text)

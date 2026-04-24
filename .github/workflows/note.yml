@@ -1,13 +1,13 @@
-name: Threads Auto Post
+name: note Article Generator
 
 on:
   schedule:
-    # 毎日 9:00 JST (= 00:00 UTC)
-    - cron: "0 0 * * *"
+    # 毎週月曜 10:00 JST (= 01:00 UTC)
+    - cron: "0 1 * * 1"
   workflow_dispatch:
 
 jobs:
-  post:
+  generate:
     runs-on: ubuntu-latest
 
     steps:
@@ -22,9 +22,14 @@ jobs:
       - name: 依存パッケージをインストール
         run: pip install -r requirements.txt
 
-      - name: Threads に投稿
+      - name: note記事を生成
         env:
           ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
-          THREADS_ACCESS_TOKEN: ${{ secrets.THREADS_ACCESS_TOKEN }}
-          THREADS_USER_ID: ${{ secrets.THREADS_USER_ID }}
-        run: python post.py
+        run: python note_post.py
+
+      - name: 生成記事をアーティファクトとして保存
+        uses: actions/upload-artifact@v4
+        with:
+          name: note-article-${{ github.run_id }}
+          path: note_article_*.md
+          retention-days: 30
