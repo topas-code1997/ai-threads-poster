@@ -1,8 +1,8 @@
 """
 note記事生成スクリプト
 - Claude claude-sonnet-4-5で最新AIトレンド記事を生成
-- SEO最適化された日本語記事を生成
-- 生成結果を note_article_YYYY-MM-DD.md として保存
+- SEO最適化された日本語記事を3本生成
+- 生成結果を note_article_YYYY-MM-DD_N.md として保存
 """
 import os
 import datetime
@@ -22,15 +22,15 @@ ARTICLE_TOPICS = [
     ("RAG 仕組み 活用 企業 2026", "RAGとは何か"),
 ]
 
-def pick_article_topic() -> tuple[str, str]:
+def pick_article_topic(offset: int = 0) -> tuple[str, str]:
     today = datetime.date.today()
-    idx = int(hashlib.md5(str(today).encode()).hexdigest(), 16) % len(ARTICLE_TOPICS)
+    idx = (int(hashlib.md5(str(today).encode()).hexdigest(), 16) + offset) % len(ARTICLE_TOPICS)
     return ARTICLE_TOPICS[idx]
 
-def generate_note_article() -> str:
+def generate_note_article(offset: int = 0) -> str:
     client = anthropic.Anthropic()
 
-    query, theme = pick_article_topic()
+    query, theme = pick_article_topic(offset)
     today_str = datetime.date.today().strftime("%Y年%m月%d日")
     year = datetime.date.today().year
 
@@ -65,21 +65,24 @@ def generate_note_article() -> str:
     )
     return text.strip()
 
-def save_article(content: str) -> str:
+def save_article(content: str, num: int = 1) -> str:
     today_str = datetime.date.today().strftime("%Y-%m-%d")
-    filename = f"note_article_{today_str}.md"
+    filename = f"note_article_{today_str}_{num}.md"
     output_path = os.path.join(os.path.dirname(__file__), filename)
     with open(output_path, "w", encoding="utf-8") as f:
         f.write(content)
     return output_path
 
 def main():
-    print("note記事を生成中...")
-    article = generate_note_article()
-    print(f"\n生成された記事（{len(article)}文字）:\n")
-    print(article[:500] + "...\n")
-    filepath = save_article(article)
-    print(f"記事を保存しました: {filepath}")
+    print("note記事を3本生成中...")
+    for i in range(3):
+        print(f"\n--- 記事 {i+1}/3 を生成中 ---")
+        article = generate_note_article(offset=i)
+        print(f"生成された記事（{len(article)}文字）:\n")
+        print(article[:500] + "...\n")
+        filepath = save_article(article, i+1)
+        print(f"記事を保存しました: {filepath}")
+    print("\n全3本の記事生成が完了しました！")
 
 if __name__ == "__main__":
     main()
