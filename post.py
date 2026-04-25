@@ -28,6 +28,17 @@ SEARCH_QUERIES = [
     "ファインチューニング 最新手法",
 ]
 
+PROMPT_TEMPLATE = (
+    "Threadsに投稿する初心者向けのAI解説を日本語で書いてください。\n\n"
+    "要件：\n"
+    "- 500文字以内\n"
+    "- 時事性のある書き出し\n"
+    "- AIの最新動向を1つ取り上げ、初心者にわかりやすく解説\n"
+    "- 最後に関連する絵文字を1〜3個つける\n"
+    "- ハッシュタグは不要\n"
+    "- 投稿本文のみを出力し、前置き・説明・マークダウンは不要\n"
+)
+
 
 def pick_search_query() -> str:
     today = datetime.date.today()
@@ -35,54 +46,71 @@ def pick_search_query() -> str:
     return SEARCH_QUERIES[idx]
 
 
-def generate_post_with_web_search() -> str:
-    # ANTHROPIC_API_KEY は環境変数から自動読み込み（GitHub Actions Secrets）
+def generate_post_without_search() -> str:
+    """web検索なしで投稿文を生成（フォールバック用）"""
     client = anthropic.Anthropic()
-
     query = pick_search_query()
-    print(f"検索クエリ: {query}")
+    print("web検索なしで生成中...")
 
-    messages = [
-        {
-            "role": "user",
-            "content": (
-                f"「{query}」で検索して最新情報を収集してください。"
-                f"その内容をもとに、Threadsに投稿する初心者向けのAI解説を日本語で書いてください。\n\n"
-                f"要件：\n"
-                f"- 500文字以内\n"
-                f"- 「今話題の〇〇について解説します」のように時事性のある書き出し\n"
-                f"- 最新ニュースや動向を1つ取り上げ、初心者にわかりやすく解説\n"
-                f"- 最後に関連する絵文字を1〜3個つける\n"
-                f"- ハッシュタグは不要\n"
-                f"- 投稿本文のみを出力し、前置き・説明・マークダウンは不要\n"
-            ),
-        }
-    ]
-
-    # web_search はサーバーサイドで自動実行される
-    while True:
-        response = client.messages.create(
-            model="claude-sonnet-4-20250514",
-            max_tokens=1024,
-            tools=[{"type": "web_search_20250305", "name": "web_search"}],
-            messages=messages,
-        )
-
-        if response.stop_reason == "end_turn":
-            break
-
-        # サーバー側ループ上限到達時は会話を続けて再リクエスト
-        if response.stop_reason == "pause_turn":
-            messages.append({"role": "assistant", "content": response.content})
-            continue
-
-        # 通常はここに到達しないが念のため
-        break
-
+    response = client.messages.create(
+        model="claude-sonnet-4-5",
+        max_tokens=1024,
+        messages=[
+            {
+                "role": "user",
+                "content": (
+                    f"「{query}」をテーマに、" + PROMPT_TEMPLATE
+                ),
+            }
+        ],
+    )
     text = next(
         (block.text for block in response.content if block.type == "text"), ""
     )
     return text.strip()
+
+
+def generate_post_with_web_search() -> str:
+    """web検索ありで投稿文を生成（最大3回リトライ、失敗時はフォールバック）"""
+    client = anthropic.Anthropic()
+    query = pick_search_query()
+    print(f"検索クエリ: {query}")
+
+    for attempt in range(3):
+        try:
+            print(f"web検索試行 {attempt + 1}/3...")
+            response = client.messages.create(
+                model="claude-sonnet-4-5",
+                max_tokens=1024,
+                tools=[{"type": "web_search_20250305", "name": "web_search"}],
+                messages=[
+                    {
+                        "role": "user",
+                        "content": (
+                            f"「{query}」で検索して最新情報を収集してください。"
+                            f"その内容をもとに、" + PROMPT_TEMPLATE
+                        ),
+                    }
+                ],
+            )
+            text = next(
+                (block.text for block in response.content if block.type == "text"), ""
+            )
+            if len(text) > 400:
+                print(f"web検索成功（{len(text)}文字）")
+                return text.strip()
+            else:
+                print(f"試行{attempt + 1}回目：文字数不足（{len(text)}文字）、リトライします...")
+
+        except Exception as e:
+            print(f"試行{attempt + 1}回目失敗: {e}")
+
+        if attempt < 2:
+            time.sleep(5)
+
+    # 3回全部失敗したらweb検索なしにフォールバック
+    print("web検索3回失敗。web検索なしに切り替えます...")
+    return generate_post_without_search()
 
 
 def create_threads_container(text: str) -> str:
@@ -109,7 +137,7 @@ def publish_threads_post(creation_id: str) -> str:
 
 
 def main():
-    print("最新情報をWeb検索しながら投稿文を生成中...")
+    print("投稿文を生成中...")
     post_text = generate_post_with_web_search()
     print(f"\n生成された投稿文（{len(post_text)}文字）:\n{post_text}\n")
 
