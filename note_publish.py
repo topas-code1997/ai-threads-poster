@@ -61,9 +61,15 @@ def post_to_note(title: str, body: str) -> bool:
             login_btn_selector = 'button:has-text("ログイン"), button[type="submit"]'
             page.click(login_btn_selector)
             page.wait_for_load_state("networkidle", timeout=20000)
-            page.wait_for_timeout(2000)
+            page.wait_for_timeout(3000)
 
-            # ログイン確認
+            # ログイン確認（スクリーンショット付き）
+            print(f"ログイン後URL: {page.url}")
+            page.screenshot(path="note_login_result.png")
+            # ページ内のエラーメッセージを確認
+            page_text = page.inner_text("body")
+            print(f"ページテキスト（先頭500文字）: {page_text[:500]}")
+
             if "login" in page.url:
                 print("ログイン失敗。メールアドレスまたはパスワードを確認してください。")
                 return False
