@@ -153,45 +153,51 @@ def post_to_note(title: str, body: str) -> bool:
             page.wait_for_selector(publish_btn_selector, timeout=15000)
             page.click(publish_btn_selector)
             page.wait_for_load_state("networkidle", timeout=20000)
-            page.wait_for_timeout(3000)
+            # SPA レンダリング完了を待つ
+            print("公開設定画面のレンダリング待機中...")
+            page.wait_for_timeout(10000)
             print(f"公開設定画面URL: {page.url}")
             page.screenshot(path="note_publish_page.png")
 
-            # ⑥ /publish/ 画面のすべてのボタンを列挙（デバッグ）
-            buttons = page.query_selector_all("button")
-            print(f"画面上のボタン数: {len(buttons)}")
-            button_texts = []
-            for btn in buttons:
+            # ⑥ クリック可能要素を列挙（デバッグ）
+            clickables = page.query_selector_all('button, a, [role="button"]')
+            print(f"画面上のクリック可能要素数: {len(clickables)}")
+            texts = []
+            for el in clickables:
                 try:
-                    text = btn.inner_text().strip()
-                    if text:
-                        button_texts.append(text)
+                    text = el.inner_text().strip()
+                    if text and len(text) < 30:
+                        texts.append(text)
                 except Exception:
                     pass
-            print(f"ボタン一覧: {button_texts}")
+            print(f"要素テキスト一覧: {texts}")
 
-            # ⑦ 最終投稿ボタンを試行
-            final_selectors = [
-                'button:has-text("投稿する")',
-                'button:has-text("公開する")',
-                'button:has-text("有料"):has-text("投稿")',
-                'button:has-text("無料"):has-text("投稿")',
-                'button:has-text("投稿"):not(:has-text("予約"))',
-            ]
+            # ⑦ テキストベースで最終投稿ボタンを探してクリック
             clicked = False
-            for sel in final_selectors:
+            for label in ["投稿する", "公開する", "今すぐ投稿", "今すぐ公開", "投稿"]:
                 try:
-                    el = page.query_selector(sel)
-                    if el:
-                        text = el.inner_text().strip()
-                        print(f"最終投稿ボタンを発見: '{text}' (セレクタ: {sel})")
-                        el.click()
+                    locator = page.get_by_role("button", name=label).last
+                    if locator.count() > 0:
+                        print(f"'{label}' ボタンを発見、クリック中...")
+                        locator.click(timeout=5000)
                         page.wait_for_load_state("networkidle", timeout=20000)
                         page.wait_for_timeout(5000)
                         clicked = True
                         break
                 except Exception as e:
-                    print(f"セレクタ {sel} 失敗: {e}")
+                    print(f"'{label}' (button role) 失敗: {e}")
+                # role=button がダメならテキスト直接
+                try:
+                    locator = page.get_by_text(label, exact=True).last
+                    if locator.count() > 0:
+                        print(f"'{label}' テキスト要素を発見、クリック中...")
+                        locator.click(timeout=5000)
+                        page.wait_for_load_state("networkidle", timeout=20000)
+                        page.wait_for_timeout(5000)
+                        clicked = True
+                        break
+                except Exception as e:
+                    print(f"'{label}' (text) 失敗: {e}")
             if not clicked:
                 print("最終投稿ボタンが見つかりませんでした。")
                 page.screenshot(path="note_no_final_button.png")
