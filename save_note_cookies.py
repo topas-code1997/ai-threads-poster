@@ -43,18 +43,35 @@ def main():
         print("ログインが完了するまで待機します（最大3分）...")
         print("ブラウザでreCAPTCHAを解いてログインしてください。")
 
-        # ログイン完了（URLがloginでなくなるまで待機）
+        # ログイン完了を待つ：note.comに戻り、かつログインページでないこと
         try:
             page.wait_for_function(
-                "() => !window.location.href.includes('/login')",
-                timeout=180000,
+                """() => {
+                    const h = window.location.hostname;
+                    const p = window.location.pathname;
+                    return h.endsWith('note.com') && !p.startsWith('/login') && !p.startsWith('/signup');
+                }""",
+                timeout=300000,
             )
         except Exception:
             print("タイムアウトしました。再度実行してください。")
             browser.close()
             return
 
-        print(f"ログイン成功！ URL: {page.url}")
+        print(f"note.comへのログイン検出！ URL: {page.url}")
+        # 認証が確実に完了するまで追加で待つ
+        page.wait_for_load_state("networkidle", timeout=30000)
+        page.wait_for_timeout(3000)
+
+        # 認証検証：ログインが必要なページに移動できるかチェック
+        print("認証を検証中（/notes/new にアクセス）...")
+        page.goto("https://note.com/notes/new", wait_until="networkidle", timeout=30000)
+        page.wait_for_timeout(2000)
+        if "/login" in page.url:
+            print("⚠️  認証検証失敗：/notes/new にアクセスできません。ログインを完全に終わらせてから再実行してください。")
+            browser.close()
+            return
+        print(f"✓ 認証確認OK！ URL: {page.url}")
 
         # 少し待ってから保存（localStorageが書き込まれるのを待つ）
         page.wait_for_timeout(3000)
