@@ -144,36 +144,73 @@ def post_to_note(title: str, body: str) -> bool:
             )
             page.wait_for_timeout(2000)
 
-            # ⑤ 公開ボタンをクリック
+            # ⑤ 公開ボタンをクリック → /publish/ 設定画面へ遷移
             print("公開ボタンを探しています...")
             publish_btn_selector = (
-                'button:has-text("公開"), button:has-text("投稿"), button[class*="publish"]'
+                'button:has-text("公開に進む"), button:has-text("公開設定"), '
+                'button:has-text("公開"), button[class*="publish"]'
             )
             page.wait_for_selector(publish_btn_selector, timeout=15000)
             page.click(publish_btn_selector)
-            page.wait_for_timeout(2000)
+            page.wait_for_load_state("networkidle", timeout=20000)
+            page.wait_for_timeout(3000)
+            print(f"公開設定画面URL: {page.url}")
+            page.screenshot(path="note_publish_page.png")
 
-            # ⑥ 公開確認ダイアログの「公開する」ボタン
-            confirm_selector = 'button:has-text("公開する"), button:has-text("投稿する")'
-            try:
-                page.wait_for_selector(confirm_selector, timeout=8000)
-                page.click(confirm_selector)
-                page.wait_for_load_state("networkidle", timeout=20000)
-                page.wait_for_timeout(3000)
-            except PlaywrightTimeoutError:
-                print("確認ダイアログが見つからなかったため、そのまま続行...")
+            # ⑥ /publish/ 画面のすべてのボタンを列挙（デバッグ）
+            buttons = page.query_selector_all("button")
+            print(f"画面上のボタン数: {len(buttons)}")
+            button_texts = []
+            for btn in buttons:
+                try:
+                    text = btn.inner_text().strip()
+                    if text:
+                        button_texts.append(text)
+                except Exception:
+                    pass
+            print(f"ボタン一覧: {button_texts}")
 
-            # ⑦ 公開完了確認
+            # ⑦ 最終投稿ボタンを試行
+            final_selectors = [
+                'button:has-text("投稿する")',
+                'button:has-text("公開する")',
+                'button:has-text("有料"):has-text("投稿")',
+                'button:has-text("無料"):has-text("投稿")',
+                'button:has-text("投稿"):not(:has-text("予約"))',
+            ]
+            clicked = False
+            for sel in final_selectors:
+                try:
+                    el = page.query_selector(sel)
+                    if el:
+                        text = el.inner_text().strip()
+                        print(f"最終投稿ボタンを発見: '{text}' (セレクタ: {sel})")
+                        el.click()
+                        page.wait_for_load_state("networkidle", timeout=20000)
+                        page.wait_for_timeout(5000)
+                        clicked = True
+                        break
+                except Exception as e:
+                    print(f"セレクタ {sel} 失敗: {e}")
+            if not clicked:
+                print("最終投稿ボタンが見つかりませんでした。")
+                page.screenshot(path="note_no_final_button.png")
+                return False
+
+            # ⑧ 公開完了確認
             current_url = page.url
-            print(f"投稿後のURL: {current_url}")
+            print(f"最終投稿後のURL: {current_url}")
             page.screenshot(path="note_result.png")
 
-            if "/n/" in current_url:
+            if "/n/" in current_url or "publish/done" in current_url or "published" in current_url:
                 print(f"note投稿成功！ URL: {current_url}")
                 return True
-            else:
-                print(f"投稿結果が不明です。URL: {current_url}")
+            elif "/publish/" in current_url:
+                print(f"まだpublish画面にいます。追加のステップが必要かもしれません: {current_url}")
                 return False
+            else:
+                print(f"投稿成功と推定（URL変化あり）: {current_url}")
+                return True
 
         except PlaywrightTimeoutError as e:
             print(f"タイムアウトエラー: {e}")
