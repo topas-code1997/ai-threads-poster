@@ -203,24 +203,24 @@ def post_to_note(title: str, body: str) -> bool:
                 page.screenshot(path="note_no_final_button.png")
                 return False
 
-            # ⑦.5 確認モーダルが出る場合に対応
+            # ⑦.5 投稿成功モーダル「記事をシェアしてみましょう」が出れば成功
             print(f"投稿クリック後URL: {page.url}")
-            page.wait_for_timeout(3000)
+            page.wait_for_timeout(5000)
             page.screenshot(path="note_after_publish_click.png")
 
-            for label in ["投稿する", "公開する", "OK", "はい", "確定"]:
-                try:
-                    loc = page.get_by_role("button", name=label).last
-                    if loc.count() > 0 and loc.is_visible():
-                        print(f"確認モーダル '{label}' を発見、再クリック中...")
-                        loc.click(timeout=5000)
-                        page.wait_for_load_state("networkidle", timeout=20000)
-                        page.wait_for_timeout(5000)
-                        break
-                except Exception:
-                    pass
+            page_text = page.inner_text("body")
+            success_phrases = [
+                "記事をシェア",
+                "作品の完成",
+                "シェアして",
+                "公開しました",
+                "投稿しました",
+            ]
+            if any(phrase in page_text for phrase in success_phrases):
+                print(f"✓ note投稿成功！（投稿完了モーダルを検出）URL: {page.url}")
+                return True
 
-            # ⑧ 公開完了確認
+            # 念のため URL 判定もする
             current_url = page.url
             print(f"最終投稿後のURL: {current_url}")
             page.screenshot(path="note_result.png")
@@ -228,12 +228,9 @@ def post_to_note(title: str, body: str) -> bool:
             if "/n/" in current_url or "publish/done" in current_url or "published" in current_url:
                 print(f"note投稿成功！ URL: {current_url}")
                 return True
-            elif "/publish/" in current_url:
-                print(f"まだpublish画面にいます。追加のステップが必要かもしれません: {current_url}")
-                return False
-            else:
-                print(f"投稿成功と推定（URL変化あり）: {current_url}")
-                return True
+
+            print(f"投稿結果が確認できませんでした。URL: {current_url}")
+            return False
 
         except PlaywrightTimeoutError as e:
             print(f"タイムアウトエラー: {e}")
