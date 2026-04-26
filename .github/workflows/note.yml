@@ -2,8 +2,8 @@ name: note Article Generator
 
 on:
   schedule:
-    # 毎週月曜 10:00 JST (= 01:00 UTC)
-    - cron: "0 1 * * 1"
+    # 毎日 10:00 JST (= 01:00 UTC)
+    - cron: "0 1 * * *"
   workflow_dispatch:
 
 jobs:
