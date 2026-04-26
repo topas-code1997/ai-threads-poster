@@ -34,6 +34,7 @@ jobs:
         env:
           NOTE_EMAIL: ${{ secrets.NOTE_EMAIL }}
           NOTE_PASSWORD: ${{ secrets.NOTE_PASSWORD }}
+          NOTE_COOKIES: ${{ secrets.NOTE_COOKIES }}
         run: python note_publish.py
 
       - name: 生成記事とスクリーンショットをアーティファクトとして保存

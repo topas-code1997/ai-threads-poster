@@ -1,0 +1,76 @@
+"""
+note.com セッションクッキー保存スクリプト（ローカル実行用）
+
+使い方:
+  python save_note_cookies.py
+
+ブラウザが開くので、手動でreCAPTCHAを解いてログインしてください。
+ログイン完了後、クッキーが note_cookies.json に保存されます。
+"""
+
+import json
+from playwright.sync_api import sync_playwright
+
+
+def main():
+    print("=" * 60)
+    print("note.com クッキー取得ツール")
+    print("=" * 60)
+    print()
+    print("ブラウザが開きます。")
+    print("reCAPTCHAを解いて手動でログインしてください。")
+    print("ログイン後、このスクリプトが自動でクッキーを保存します。")
+    print()
+
+    with sync_playwright() as p:
+        browser = p.chromium.launch(
+            headless=False,  # 手動操作のため表示モード
+            args=["--disable-blink-features=AutomationControlled"],
+        )
+        context = browser.new_context(
+            viewport={"width": 1280, "height": 900},
+        )
+        page = context.new_page()
+
+        print("note.com ログインページを開いています...")
+        page.goto("https://note.com/login")
+
+        print("ログインが完了するまで待機します（最大3分）...")
+        print("ブラウザでreCAPTCHAを解いてログインしてください。")
+
+        # ログイン完了（URLがloginでなくなるまで待機）
+        try:
+            page.wait_for_function(
+                "() => !window.location.href.includes('/login')",
+                timeout=180000,
+            )
+        except Exception:
+            print("タイムアウトしました。再度実行してください。")
+            browser.close()
+            return
+
+        print(f"ログイン成功！ URL: {page.url}")
+
+        # クッキーを取得・保存
+        cookies = context.cookies()
+        with open("note_cookies.json", "w", encoding="utf-8") as f:
+            json.dump(cookies, f, ensure_ascii=False, indent=2)
+
+        print()
+        print("=" * 60)
+        print("クッキーを note_cookies.json に保存しました！")
+        print()
+        print("次のステップ：")
+        print("1. 下記コマンドでGitHub Secretに登録してください：")
+        print()
+        print("   gh secret set NOTE_COOKIES < note_cookies.json")
+        print()
+        print("   ※ note_cookies.json の内容をコピーして")
+        print("      GitHub → Settings → Secrets → NOTE_COOKIES に貼り付けでもOK")
+        print("=" * 60)
+
+        browser.close()
+
+
+if __name__ == "__main__":
+    main()
