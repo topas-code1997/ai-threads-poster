@@ -115,23 +115,29 @@ def generate_post_with_web_search() -> str:
 
 def create_threads_container(text: str) -> str:
     url = f"{THREADS_BASE_URL}/{THREADS_USER_ID}/threads"
-    params = {
+    # params= だと日本語・改行がURLクエリに乗り400エラーになるため
+    # data= でPOSTボディとして送信する
+    data = {
         "media_type": "TEXT",
         "text": text,
         "access_token": THREADS_ACCESS_TOKEN,
     }
-    response = requests.post(url, params=params)
+    response = requests.post(url, data=data)
+    if not response.ok:
+        print(f"Threads APIエラー: {response.status_code} {response.text}")
     response.raise_for_status()
     return response.json()["id"]
 
 
 def publish_threads_post(creation_id: str) -> str:
     url = f"{THREADS_BASE_URL}/{THREADS_USER_ID}/threads_publish"
-    params = {
+    data = {
         "creation_id": creation_id,
         "access_token": THREADS_ACCESS_TOKEN,
     }
-    response = requests.post(url, params=params)
+    response = requests.post(url, data=data)
+    if not response.ok:
+        print(f"Threads 公開APIエラー: {response.status_code} {response.text}")
     response.raise_for_status()
     return response.json()["id"]
 
