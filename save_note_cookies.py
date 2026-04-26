@@ -29,6 +29,11 @@ def main():
         )
         context = browser.new_context(
             viewport={"width": 1280, "height": 900},
+            user_agent=(
+                "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) "
+                "AppleWebKit/537.36 (KHTML, like Gecko) "
+                "Chrome/120.0.0.0 Safari/537.36"
+            ),
         )
         page = context.new_page()
 
@@ -51,10 +56,13 @@ def main():
 
         print(f"ログイン成功！ URL: {page.url}")
 
-        # クッキーを取得・保存
-        cookies = context.cookies()
+        # 少し待ってから保存（localStorageが書き込まれるのを待つ）
+        page.wait_for_timeout(3000)
+
+        # storage_state（クッキー + localStorage）を保存
+        state = context.storage_state()
         with open("note_cookies.json", "w", encoding="utf-8") as f:
-            json.dump(cookies, f, ensure_ascii=False, indent=2)
+            json.dump(state, f, ensure_ascii=False, indent=2)
 
         print()
         print("=" * 60)

@@ -39,49 +39,57 @@ def post_to_note(title: str, body: str) -> bool:
                 "--disable-blink-features=AutomationControlled",
             ],
         )
-        context = browser.new_context(
-            viewport={"width": 1280, "height": 900},
-            user_agent=(
+        # ① 認証（storage_state優先、なければパスワードログイン）
+        context_kwargs = {
+            "viewport": {"width": 1280, "height": 900},
+            "user_agent": (
                 "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) "
                 "AppleWebKit/537.36 (KHTML, like Gecko) "
                 "Chrome/120.0.0.0 Safari/537.36"
             ),
-        )
+        }
+        used_storage_state = False
+        if NOTE_COOKIES_JSON:
+            try:
+                state = json.loads(NOTE_COOKIES_JSON)
+                # 古い形式（クッキーだけの配列）と新形式（storage_state）の両対応
+                if isinstance(state, list):
+                    print("旧形式のクッキー（配列）を検出しました")
+                    # 旧形式の場合は後でadd_cookiesする
+                else:
+                    print("storage_state（クッキー+localStorage）を検出しました")
+                    context_kwargs["storage_state"] = state
+                    used_storage_state = True
+            except json.JSONDecodeError as e:
+                print(f"NOTE_COOKIESのJSONパース失敗: {e}")
+
+        context = browser.new_context(**context_kwargs)
         page = context.new_page()
 
         try:
-            # ① 認証（クッキー優先、なければパスワードログイン）
-            if NOTE_COOKIES_JSON:
-                print("クッキー認証を試みます...")
+            if NOTE_COOKIES_JSON and not used_storage_state:
+                # 旧形式のクッキー配列をadd_cookies
                 try:
                     cookies = json.loads(NOTE_COOKIES_JSON)
-                    context.add_cookies(cookies)
-                    print(f"{len(cookies)} 件のクッキーを設定しました")
-                except json.JSONDecodeError as e:
-                    print(f"クッキーのJSONパース失敗: {e}")
-                    print("パスワードログインに切り替えます...")
+                    if isinstance(cookies, list):
+                        context.add_cookies(cookies)
+                        print(f"{len(cookies)} 件のクッキーを設定しました")
+                except Exception as e:
+                    print(f"クッキー設定失敗: {e}")
+
+            if NOTE_COOKIES_JSON:
+                # セッション確認
+                print("セッション確認中...")
+                page.goto("https://note.com/notes/new", wait_until="networkidle", timeout=30000)
+                page.wait_for_timeout(2000)
+                print(f"アクセス後URL: {page.url}")
+
+                if "/login" in page.url:
+                    print("セッション無効。パスワードログインに切り替えます...")
                     if not _password_login(page):
                         return False
                 else:
-                    # クッキーが有効か確認
-                    print("note.comにアクセスしてセッション確認中...")
-                    page.goto("https://note.com", wait_until="networkidle", timeout=30000)
-                    page.wait_for_timeout(2000)
-                    print(f"アクセス後URL: {page.url}")
-
-                    # ログイン済みか確認（マイページへリダイレクトされるか）
-                    if "/login" in page.url or page.url == "https://note.com/":
-                        # ログインページへ行って確認
-                        page.goto("https://note.com/notes/new", wait_until="networkidle", timeout=30000)
-                        page.wait_for_timeout(2000)
-                        if "/login" in page.url:
-                            print("クッキーが無効または期限切れです。パスワードログインに切り替えます...")
-                            if not _password_login(page):
-                                return False
-                        else:
-                            print("クッキー認証成功！")
-                    else:
-                        print("クッキー認証成功！")
+                    print("セッション認証成功！")
             else:
                 print("NOTE_COOKIES未設定。パスワードログインを試みます...")
                 if not _password_login(page):
