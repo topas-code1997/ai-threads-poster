@@ -203,6 +203,23 @@ def post_to_note(title: str, body: str) -> bool:
                 page.screenshot(path="note_no_final_button.png")
                 return False
 
+            # ⑦.5 確認モーダルが出る場合に対応
+            print(f"投稿クリック後URL: {page.url}")
+            page.wait_for_timeout(3000)
+            page.screenshot(path="note_after_publish_click.png")
+
+            for label in ["投稿する", "公開する", "OK", "はい", "確定"]:
+                try:
+                    loc = page.get_by_role("button", name=label).last
+                    if loc.count() > 0 and loc.is_visible():
+                        print(f"確認モーダル '{label}' を発見、再クリック中...")
+                        loc.click(timeout=5000)
+                        page.wait_for_load_state("networkidle", timeout=20000)
+                        page.wait_for_timeout(5000)
+                        break
+                except Exception:
+                    pass
+
             # ⑧ 公開完了確認
             current_url = page.url
             print(f"最終投稿後のURL: {current_url}")
