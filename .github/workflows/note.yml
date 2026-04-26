@@ -1,4 +1,4 @@
-name: note Article Generator
+name: note Article Generator & Publisher
 
 on:
   schedule:
@@ -7,7 +7,7 @@ on:
   workflow_dispatch:
 
 jobs:
-  generate:
+  generate-and-publish:
     runs-on: ubuntu-latest
 
     steps:
@@ -22,14 +22,26 @@ jobs:
       - name: 依存パッケージをインストール
         run: pip install -r requirements.txt
 
+      - name: Playwright ブラウザをインストール
+        run: playwright install chromium --with-deps
+
       - name: note記事を生成
         env:
           ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
         run: python note_post.py
 
-      - name: 生成記事をアーティファクトとして保存
+      - name: noteに自動投稿
+        env:
+          NOTE_EMAIL: ${{ secrets.NOTE_EMAIL }}
+          NOTE_PASSWORD: ${{ secrets.NOTE_PASSWORD }}
+        run: python note_publish.py
+
+      - name: 生成記事とスクリーンショットをアーティファクトとして保存
+        if: always()
         uses: actions/upload-artifact@v4
         with:
           name: note-article-${{ github.run_id }}
-          path: note_article_*.md
+          path: |
+            note_article_*.md
+            note_*.png
           retention-days: 30
