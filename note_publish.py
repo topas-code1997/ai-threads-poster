@@ -46,15 +46,20 @@ def post_to_note(title: str, body: str) -> bool:
             page.wait_for_timeout(2000)
 
             print("メールアドレスを入力中...")
-            page.fill('input[name="email"]', NOTE_EMAIL)
+            email_selector = 'input[type="email"], input[placeholder*="mail"], input[placeholder*="note ID"], input[name="email_or_id"]'
+            page.wait_for_selector(email_selector, timeout=15000)
+            page.fill(email_selector, NOTE_EMAIL)
             page.wait_for_timeout(500)
 
             print("パスワードを入力中...")
-            page.fill('input[name="password"]', NOTE_PASSWORD)
+            password_selector = 'input[type="password"]'
+            page.wait_for_selector(password_selector, timeout=10000)
+            page.fill(password_selector, NOTE_PASSWORD)
             page.wait_for_timeout(500)
 
             print("ログインボタンをクリック...")
-            page.click('button[type="submit"]')
+            login_btn_selector = 'button:has-text("ログイン"), button[type="submit"]'
+            page.click(login_btn_selector)
             page.wait_for_load_state("networkidle", timeout=20000)
             page.wait_for_timeout(2000)
 
