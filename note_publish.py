@@ -214,7 +214,11 @@ def post_to_note(title: str, body: str) -> bool:
                 "作品の完成",
                 "シェアして",
                 "公開しました",
+                "公開されました",
                 "投稿しました",
+                "投稿されました",
+                "連続投稿",
+                "創作が継続",
             ]
             if any(phrase in page_text for phrase in success_phrases):
                 print(f"✓ note投稿成功！（投稿完了モーダルを検出）URL: {page.url}")
