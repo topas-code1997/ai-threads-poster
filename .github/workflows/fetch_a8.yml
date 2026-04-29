@@ -1,0 +1,55 @@
+name: A8.net Affiliate Links Updater
+
+on:
+  schedule:
+    # 毎週月曜 10:30 JST (= 月曜 01:30 UTC)
+    - cron: "30 1 * * 1"
+  workflow_dispatch:
+
+jobs:
+  fetch-and-commit:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+
+    steps:
+      - name: リポジトリをチェックアウト
+        uses: actions/checkout@v4
+
+      - name: Python をセットアップ
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: 依存パッケージをインストール
+        run: pip install -r requirements.txt
+
+      - name: Playwright ブラウザをインストール
+        run: playwright install chromium --with-deps
+
+      - name: A8からアフィリエイトリンク取得
+        env:
+          A8_COOKIES: ${{ secrets.A8_COOKIES }}
+          ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
+        run: python fetch_a8_links.py
+
+      - name: 変更があればaffiliate_links.jsonをコミット
+        run: |
+          if [[ -n "$(git status --porcelain affiliate_links.json)" ]]; then
+            git config user.name "github-actions[bot]"
+            git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+            git add affiliate_links.json
+            git commit -m "Update affiliate_links.json from A8.net [skip ci]"
+            git push
+          else
+            echo "affiliate_links.jsonに変更なし"
+          fi
+
+      - name: 失敗時のスクリーンショットをアーティファクト保存
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: a8-fetch-error-${{ github.run_id }}
+          path: a8_*.png
+          retention-days: 7
+          if-no-files-found: ignore
