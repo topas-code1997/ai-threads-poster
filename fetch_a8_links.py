@@ -71,30 +71,29 @@ def classify_program(name: str, description: str = "") -> str:
 
 
 def fetch_partner_programs(page) -> list[dict]:
-    """参加中プログラム一覧を取得（新旧UI両対応）"""
-    # 候補URL（新旧両方）
+    """参加中プログラム一覧を取得（新管理画面対応）"""
+    # 正しい新UIのURL
     candidate_urls = [
-        "https://pub.a8.net/a8v2/media/program/joinedProgramList.do",
-        "https://pub.a8.net/a8v2/media/program/programList.do",
+        "https://pub.a8.net/a8v2/media/partnerProgramListAction.do?act=search&viewPage=",
+        "https://pub.a8.net/a8v2/media/partnerProgramListAction.do",
         "https://pub.a8.net/a8v2/asPartnerProgramListAction.do",
-        "https://pub.a8.net/a8v2/media/program/joinList.do",
     ]
     found = False
     for url in candidate_urls:
         print(f"試行: {url}")
         try:
             page.goto(url, wait_until="networkidle", timeout=20000)
-            page.wait_for_timeout(2000)
+            page.wait_for_timeout(3000)
             if "login" in page.url.lower():
                 continue
-            # プログラム名らしきリンクが存在するか確認
-            test_links = page.query_selector_all('a[href*="programSearchId"], a[href*="asProgramDetailAction"], a[href*="programDetail"]')
-            if test_links:
-                print(f"  → リンク発見（{len(test_links)}件）、このページを使用")
+            # 「プログラム名」のラベルがあるか
+            html = page.content()
+            if "プログラム名" in html and ("広告リンク" in html or "プログラム詳細" in html):
+                print(f"  → 参加中プログラム一覧を確認")
                 found = True
                 break
             else:
-                print(f"  → リンクなし（ボタン類: {len(page.query_selector_all('a'))}件）")
+                print(f"  → ラベル見つからず")
         except PlaywrightTimeoutError:
             continue
         except Exception:
@@ -133,52 +132,89 @@ def fetch_partner_programs(page) -> list[dict]:
 
     # ページネーションが存在する場合に備えて全ページ巡回
     while True:
-        # 各プログラム行を抽出
-        links = page.query_selector_all(
-            'a[href*="programSearchId"], a[href*="asProgramDetailAction"], a[href*="programDetail"]'
+        # JS でDOMを解析して各プログラムを抽出
+        # スクリーンショットの構造：プログラム情報のカード/テーブル内に
+        # 「プログラム名」ラベル + 値のセル、「広告リンク」緑ボタンが存在
+        extracted = page.evaluate(
+            """() => {
+                const results = [];
+                // 「広告リンク」ボタンを起点に、その親要素から「プログラム名」を探す
+                const adLinkButtons = Array.from(
+                    document.querySelectorAll('a, button')
+                ).filter(el => el.innerText.trim().replace(/\\s+/g, '').includes('広告リンク'));
+
+                for (const btn of adLinkButtons) {
+                    // この行/カード全体をたどる（最大10階層上まで）
+                    let container = btn;
+                    let name = '';
+                    let advertiser = '';
+                    let detailHref = '';
+                    for (let depth = 0; depth < 10; depth++) {
+                        if (!container || !container.parentElement) break;
+                        container = container.parentElement;
+                        const text = container.innerText || '';
+                        if (text.includes('プログラム名') && text.includes('広告主名')) {
+                            // この container が当該プログラムの行
+                            // 「プログラム名」の直後の値を取得
+                            const m = text.match(/プログラム名\\s*\\n+([^\\n]+)/);
+                            if (m) name = m[1].trim();
+                            const m2 = text.match(/広告主名\\s*\\n+([^\\n]+)/);
+                            if (m2) advertiser = m2[1].trim();
+                            // 「プログラム詳細」リンクのhrefを取得
+                            const detailLink = container.querySelector('a[href*="insId="]');
+                            if (detailLink) {
+                                detailHref = detailLink.getAttribute('href') || '';
+                            }
+                            break;
+                        }
+                    }
+                    // 「広告リンク」ボタンのhrefも取得（クリック先）
+                    const adHref = btn.getAttribute('href') || '';
+                    if (name) {
+                        results.push({
+                            name: name,
+                            advertiser: advertiser,
+                            detailHref: detailHref,
+                            adLinkHref: adHref,
+                        });
+                    }
+                }
+                return results;
+            }"""
         )
-        for link in links:
-            try:
-                href = link.get_attribute("href") or ""
-                # プログラムIDをURLから抽出
+
+        for item in extracted or []:
+            name = (item.get("name") or "").strip()
+            detail_href = item.get("detailHref") or ""
+            ad_link_href = item.get("adLinkHref") or ""
+            advertiser = item.get("advertiser") or ""
+
+            # insId を抽出
+            pid = None
+            for href in (detail_href, ad_link_href):
                 m = re.search(r"insId=([\w]+)", href)
-                pid = m.group(1) if m else None
-                if not pid:
-                    m = re.search(r"programSearchId=(\d+)", href)
-                    pid = m.group(1) if m else None
-                if not pid:
-                    continue
-                # プログラム名は同じ <tr> 行にあるはず。親rowを辿って探す
-                name = ""
-                try:
-                    row = link.evaluate_handle(
-                        "el => el.closest('tr') || el.closest('li') || el.parentElement"
-                    )
-                    if row:
-                        row_text = row.evaluate("el => el.innerText")
-                        # 行テキストから「プログラム詳細」「広告リンク」などのボタン語を除去し、最初の意味ある行をプログラム名に
-                        candidates = [
-                            s.strip()
-                            for s in row_text.splitlines()
-                            if s.strip()
-                            and s.strip() not in ("プログラム詳細", "広告リンク", "提携中", "成果報酬", "広告主", "提携状況")
-                            and len(s.strip()) > 1
-                        ]
-                        if candidates:
-                            name = candidates[0][:80]
-                except Exception:
-                    pass
+                if m:
+                    pid = m.group(1)
+                    break
+            if not pid:
+                # ad_link_href から program_id 等を抽出
+                m = re.search(r"(?:program|ad)Id=([\w]+)", ad_link_href)
+                if m:
+                    pid = m.group(1)
+            if not pid:
+                pid = f"unknown_{len(programs)}"
 
-                if not name:
-                    name = f"program_{pid}"
-
-                if pid and not any(p["id"] == pid for p in programs):
-                    full_href = href if href.startswith("http") else "https://pub.a8.net" + href
-                    programs.append({"id": pid, "name": name, "detail_href": full_href})
-                    print(f"  ✓ {name} (insId={pid})")
-            except Exception as e:
-                print(f"  リンク処理エラー: {e}")
-                continue
+            if name and not any(p["id"] == pid for p in programs):
+                programs.append(
+                    {
+                        "id": pid,
+                        "name": name,
+                        "advertiser": advertiser,
+                        "detail_href": detail_href,
+                        "ad_link_href": ad_link_href,
+                    }
+                )
+                print(f"  ✓ {name} (insId={pid})")
 
         # 次のページへ
         next_btn = page.query_selector('a:has-text("次へ"), a.pageNext, a[rel="next"]')
@@ -196,39 +232,71 @@ def fetch_partner_programs(page) -> list[dict]:
     return programs
 
 
+def _extract_px_a8_url(page) -> str | None:
+    """ページ内のHTMLとtextareaから px.a8.net のURLを抽出"""
+    html = page.content()
+    m = re.search(r'(https://px\.a8\.net/svt/ejp\?[^"\'<>\s]+)', html)
+    if m:
+        return m.group(1)
+    try:
+        textareas = page.query_selector_all("textarea")
+        for ta in textareas:
+            val = ta.input_value() or ""
+            m2 = re.search(r'(https://px\.a8\.net/svt/ejp\?[^"\'<>\s]+)', val)
+            if m2:
+                return m2.group(1)
+    except Exception:
+        pass
+    return None
+
+
 def fetch_text_link(page, program: dict) -> str | None:
     """プログラムのテキスト広告URLを取得"""
+    ad_link_href = program.get("ad_link_href", "")
+    detail_href = program.get("detail_href", "")
     pid = program["id"]
-    # 広告リンク取得ページのフォーマット（新旧両対応）
-    candidates = [
-        program.get("detail_href", ""),
-        f"https://pub.a8.net/a8v2/media/programDetailAction.do?insId={pid}",
-        f"https://pub.a8.net/a8v2/asProgramDetailAction.do?insId={pid}",
-    ]
+
+    # まず「広告リンク」ボタンのhrefに直接遷移
+    candidates = []
+    for href in (ad_link_href, detail_href):
+        if href:
+            full = href if href.startswith("http") else "https://pub.a8.net" + ("" if href.startswith("/") else "/") + href
+            candidates.append(full)
+    # 既知のURLパターンも試す
+    candidates.extend(
+        [
+            f"https://pub.a8.net/a8v2/media/asGetTextAction.do?insId={pid}",
+            f"https://pub.a8.net/a8v2/media/asGetTextLinkAction.do?insId={pid}",
+            f"https://pub.a8.net/a8v2/media/asAdLinkSelectAction.do?insId={pid}",
+        ]
+    )
+
     for url in candidates:
-        if not url:
-            continue
-        if not url.startswith("http"):
-            url = "https://pub.a8.net" + ("" if url.startswith("/") else "/") + url
         try:
             page.goto(url, wait_until="networkidle", timeout=20000)
-            page.wait_for_timeout(2000)
-            # ページ内の textarea/input から px.a8.net リンクを探す
-            html = page.content()
-            m = re.search(r'(https://px\.a8\.net/svt/ejp\?[^"\'<>\s]+)', html)
-            if m:
-                return m.group(1)
-            # textarea から探す
-            textareas = page.query_selector_all("textarea")
-            for ta in textareas:
-                val = ta.input_value() if ta else ""
-                m2 = re.search(r'(https://px\.a8\.net/svt/ejp\?[^"\'<>\s]+)', val or "")
-                if m2:
-                    return m2.group(1)
+            page.wait_for_timeout(2500)
+            # px.a8.net のテキスト広告URLを探す
+            found = _extract_px_a8_url(page)
+            if found:
+                return found
+            # 「テキスト」タブ/ボタンをクリック
+            for label in ["テキスト", "テキスト広告", "シンプル"]:
+                try:
+                    btn = page.query_selector(f'a:has-text("{label}"), button:has-text("{label}")')
+                    if btn:
+                        btn.click()
+                        page.wait_for_load_state("networkidle", timeout=10000)
+                        page.wait_for_timeout(2000)
+                        found2 = _extract_px_a8_url(page)
+                        if found2:
+                            return found2
+                except Exception:
+                    continue
         except PlaywrightTimeoutError:
             continue
         except Exception:
             continue
+
     return None
 
 
@@ -287,9 +355,15 @@ def main():
         # 各プログラムのテキスト広告URLを取得
         results = {cat: [] for cat in CATEGORIES}
         for i, prog in enumerate(programs, 1):
-            print(f"[{i}/{len(programs)}] {prog['name']}")
+            print(f"[{i}/{len(programs)}] {prog['name']} (insId={prog['id']})")
             url = fetch_text_link(page, prog)
             if not url:
+                # 1件目だけ詳細ページのスクリーンショット & タイトル表示
+                if i == 1:
+                    print(f"  詳細ページ最終URL: {page.url}")
+                    print(f"  ページタイトル: {page.title()}")
+                    page.screenshot(path=f"a8_program_detail_{prog['id']}.png")
+                    print(f"  → スクリーンショット: a8_program_detail_{prog['id']}.png")
                 print("  → リンク取得失敗、スキップ")
                 continue
             cat = classify_program(prog["name"])
