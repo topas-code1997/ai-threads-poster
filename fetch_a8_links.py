@@ -137,34 +137,47 @@ def fetch_partner_programs(page) -> list[dict]:
         links = page.query_selector_all(
             'a[href*="programSearchId"], a[href*="asProgramDetailAction"], a[href*="programDetail"]'
         )
-        print(f"  デバッグ: リンク {len(links)} 件のhref/textを表示")
-        for i, link in enumerate(links):
-            try:
-                href = link.get_attribute("href") or ""
-                text = link.inner_text().strip()
-                print(f"    [{i}] text='{text[:40]}' href='{href[:120]}'")
-            except Exception:
-                pass
         for link in links:
             try:
-                name = link.inner_text().strip()
                 href = link.get_attribute("href") or ""
-                if not name or len(name) < 2 or len(name) > 80:
-                    continue
                 # プログラムIDをURLから抽出
-                m = re.search(r"programSearchId=(\d+)", href)
+                m = re.search(r"insId=([\w]+)", href)
                 pid = m.group(1) if m else None
                 if not pid:
-                    m2 = re.search(r"[?&]a8mat=([^&]+)", href)
-                    if m2:
-                        pid = m2.group(1)
+                    m = re.search(r"programSearchId=(\d+)", href)
+                    pid = m.group(1) if m else None
                 if not pid:
-                    m3 = re.search(r"/(\d{8,})", href)
-                    if m3:
-                        pid = m3.group(1)
+                    continue
+                # プログラム名は同じ <tr> 行にあるはず。親rowを辿って探す
+                name = ""
+                try:
+                    row = link.evaluate_handle(
+                        "el => el.closest('tr') || el.closest('li') || el.parentElement"
+                    )
+                    if row:
+                        row_text = row.evaluate("el => el.innerText")
+                        # 行テキストから「プログラム詳細」「広告リンク」などのボタン語を除去し、最初の意味ある行をプログラム名に
+                        candidates = [
+                            s.strip()
+                            for s in row_text.splitlines()
+                            if s.strip()
+                            and s.strip() not in ("プログラム詳細", "広告リンク", "提携中", "成果報酬", "広告主", "提携状況")
+                            and len(s.strip()) > 1
+                        ]
+                        if candidates:
+                            name = candidates[0][:80]
+                except Exception:
+                    pass
+
+                if not name:
+                    name = f"program_{pid}"
+
                 if pid and not any(p["id"] == pid for p in programs):
-                    programs.append({"id": pid, "name": name, "detail_href": href})
-            except Exception:
+                    full_href = href if href.startswith("http") else "https://pub.a8.net" + href
+                    programs.append({"id": pid, "name": name, "detail_href": full_href})
+                    print(f"  ✓ {name} (insId={pid})")
+            except Exception as e:
+                print(f"  リンク処理エラー: {e}")
                 continue
 
         # 次のページへ
@@ -186,11 +199,11 @@ def fetch_partner_programs(page) -> list[dict]:
 def fetch_text_link(page, program: dict) -> str | None:
     """プログラムのテキスト広告URLを取得"""
     pid = program["id"]
-    # 広告リンク取得ページのフォーマット（複数候補）
+    # 広告リンク取得ページのフォーマット（新旧両対応）
     candidates = [
-        f"https://pub.a8.net/a8v2/asProgramSearchAction.do?programSearchId={pid}",
-        f"https://pub.a8.net/a8v2/asPartnerProgramAction.do?programSearchId={pid}",
         program.get("detail_href", ""),
+        f"https://pub.a8.net/a8v2/media/programDetailAction.do?insId={pid}",
+        f"https://pub.a8.net/a8v2/asProgramDetailAction.do?insId={pid}",
     ]
     for url in candidates:
         if not url:
@@ -199,12 +212,19 @@ def fetch_text_link(page, program: dict) -> str | None:
             url = "https://pub.a8.net" + ("" if url.startswith("/") else "/") + url
         try:
             page.goto(url, wait_until="networkidle", timeout=20000)
-            page.wait_for_timeout(1500)
+            page.wait_for_timeout(2000)
             # ページ内の textarea/input から px.a8.net リンクを探す
             html = page.content()
             m = re.search(r'(https://px\.a8\.net/svt/ejp\?[^"\'<>\s]+)', html)
             if m:
                 return m.group(1)
+            # textarea から探す
+            textareas = page.query_selector_all("textarea")
+            for ta in textareas:
+                val = ta.input_value() if ta else ""
+                m2 = re.search(r'(https://px\.a8\.net/svt/ejp\?[^"\'<>\s]+)', val or "")
+                if m2:
+                    return m2.group(1)
         except PlaywrightTimeoutError:
             continue
         except Exception:
