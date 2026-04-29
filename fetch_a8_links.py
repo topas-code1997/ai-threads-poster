@@ -32,10 +32,46 @@ MEMBER_TOP_URL = "https://pub.a8.net/a8v2/asMemberAction.do"
 CATEGORIES = ["AI", "プログラミング", "副業", "業務効率化", "その他"]
 
 
+def _classify_by_keyword(name: str) -> str:
+    """キーワードベースの簡易分類（APIキー不要のフォールバック）"""
+    n = name
+    nl = name.lower()
+    ai_keywords = [
+        "AI", "ai", "ChatGPT", "Claude", "Gemini", "Suno", "Midjourney",
+        "Stable Diffusion", "画像生成", "生成AI", "LLM", "プロンプト", "DALL",
+    ]
+    prog_keywords = [
+        "プログラミング", "コーディング", "エンジニア", "プログラマ",
+        "Python", "JavaScript", "Web開発", "ITスクール",
+    ]
+    sidejob_keywords = [
+        "副業", "クラウドソーシング", "ココナラ", "ランサーズ", "クラウドワーク",
+        "在宅", "スキマ", "Webライター",
+    ]
+    biz_keywords = [
+        "業務", "効率", "自動化", "SaaS", "生産性", "会計", "勤怠",
+        "ドメイン", "サーバー", "ホスティング", "CRM",
+    ]
+
+    if any(k in n for k in ai_keywords):
+        return "AI"
+    if any(k in n for k in prog_keywords):
+        return "プログラミング"
+    if any(k in n for k in sidejob_keywords):
+        return "副業"
+    if any(k in n for k in biz_keywords):
+        return "業務効率化"
+    return "その他"
+
+
 def classify_program(name: str, description: str = "") -> str:
-    """Claudeでプログラム名・説明からカテゴリを判定"""
-    client = anthropic.Anthropic()
-    prompt = f"""以下のアフィリエイト案件を、必ずカテゴリ一覧から1つだけ選んでください。
+    """Claudeでプログラム名・説明からカテゴリを判定。APIキーが無い場合はキーワード分類"""
+    if not os.environ.get("ANTHROPIC_API_KEY"):
+        return _classify_by_keyword(name)
+
+    try:
+        client = anthropic.Anthropic()
+        prompt = f"""以下のアフィリエイト案件を、必ずカテゴリ一覧から1つだけ選んでください。
 
 案件名: {name}
 説明: {description}
@@ -51,7 +87,6 @@ def classify_program(name: str, description: str = "") -> str:
 
 出力はカテゴリ名のみ（"AI" など、それ以外の文字は一切不要）。"""
 
-    try:
         response = client.messages.create(
             model="claude-sonnet-4-5",
             max_tokens=20,
@@ -64,10 +99,10 @@ def classify_program(name: str, description: str = "") -> str:
         for cat in CATEGORIES:
             if cat in result:
                 return cat
-        return "その他"
+        return _classify_by_keyword(name)
     except Exception as e:
-        print(f"  分類失敗（その他にフォールバック）: {e}")
-        return "その他"
+        print(f"  分類失敗、キーワード判定に切替: {e}")
+        return _classify_by_keyword(name)
 
 
 def fetch_partner_programs(page) -> list[dict]:
