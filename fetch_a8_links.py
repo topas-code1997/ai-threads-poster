@@ -269,17 +269,24 @@ def fetch_partner_programs(page) -> list[dict]:
 
 def _extract_px_a8_url(page) -> str | None:
     """ページ内のHTMLとtextareaから px.a8.net のURLを抽出"""
+
+    def _clean_url(raw: str) -> str:
+        """HTML エンティティ（&quot; 等）をURLの末尾から除去する"""
+        # &quot; (&amp; も含む HTML エンティティ) で終わる部分を削除
+        url = re.sub(r'&(?:quot|amp|lt|gt|apos);.*$', '', raw)
+        return url.strip()
+
     html = page.content()
     m = re.search(r'(https://px\.a8\.net/svt/ejp\?[^"\'<>\s]+)', html)
     if m:
-        return m.group(1)
+        return _clean_url(m.group(1))
     try:
         textareas = page.query_selector_all("textarea")
         for ta in textareas:
             val = ta.input_value() or ""
             m2 = re.search(r'(https://px\.a8\.net/svt/ejp\?[^"\'<>\s]+)', val)
             if m2:
-                return m2.group(1)
+                return _clean_url(m2.group(1))
     except Exception:
         pass
     return None
