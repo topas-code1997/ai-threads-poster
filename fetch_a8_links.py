@@ -71,35 +71,89 @@ def classify_program(name: str, description: str = "") -> str:
 
 
 def fetch_partner_programs(page) -> list[dict]:
-    """参加中プログラム一覧を取得"""
-    print(f"参加中プログラム一覧を取得: {PARTNER_LIST_URL}")
-    page.goto(PARTNER_LIST_URL, wait_until="networkidle", timeout=30000)
-    page.wait_for_timeout(2000)
+    """参加中プログラム一覧を取得（新旧UI両対応）"""
+    # 候補URL（新旧両方）
+    candidate_urls = [
+        "https://pub.a8.net/a8v2/media/program/joinedProgramList.do",
+        "https://pub.a8.net/a8v2/media/program/programList.do",
+        "https://pub.a8.net/a8v2/asPartnerProgramListAction.do",
+        "https://pub.a8.net/a8v2/media/program/joinList.do",
+    ]
+    found = False
+    for url in candidate_urls:
+        print(f"試行: {url}")
+        try:
+            page.goto(url, wait_until="networkidle", timeout=20000)
+            page.wait_for_timeout(2000)
+            if "login" in page.url.lower():
+                continue
+            # プログラム名らしきリンクが存在するか確認
+            test_links = page.query_selector_all('a[href*="programSearchId"], a[href*="asProgramDetailAction"], a[href*="programDetail"]')
+            if test_links:
+                print(f"  → リンク発見（{len(test_links)}件）、このページを使用")
+                found = True
+                break
+            else:
+                print(f"  → リンクなし（ボタン類: {len(page.query_selector_all('a'))}件）")
+        except PlaywrightTimeoutError:
+            continue
+        except Exception:
+            continue
 
-    if "login" in page.url.lower():
-        print("⚠️ A8セッション無効。クッキーを再取得してください。")
+    if not found:
+        # 最後の手段：メニューから手動ナビゲート
+        print("メニュー経由で「参加中プログラム」を探します...")
+        try:
+            page.goto("https://pub.a8.net/a8v2/media/memberAction.do", wait_until="networkidle", timeout=30000)
+            page.wait_for_timeout(2000)
+            # 「プログラム管理」メニューをホバー or クリック
+            for label in ["プログラム管理", "参加中プログラム", "提携中プログラム"]:
+                try:
+                    elements = page.query_selector_all(f'a:has-text("{label}"), button:has-text("{label}")')
+                    if elements:
+                        print(f"  '{label}' リンク発見（{len(elements)}件）")
+                        for el in elements:
+                            href = el.get_attribute("href")
+                            if href:
+                                print(f"    href: {href}")
+                except Exception:
+                    pass
+            # デバッグ: ページに含まれる /a8v2/ で始まるパスを全て列挙
+            html = page.content()
+            paths = set(re.findall(r'/a8v2/[a-zA-Z0-9_/.]+', html))
+            print(f"ページ内のa8v2パス一覧（最大30件）:")
+            for p in list(paths)[:30]:
+                print(f"  {p}")
+            page.screenshot(path="a8_no_programs.png")
+        except Exception as e:
+            print(f"メニュー探索失敗: {e}")
         return []
 
     programs = []
 
     # ページネーションが存在する場合に備えて全ページ巡回
     while True:
-        # 各プログラム行を抽出（A8のテーブル/リスト構造はクラス名で識別）
-        # 一般的にプログラム名のリンクは asProgramSearchAction や href に s00000 が含まれる
-        links = page.query_selector_all('a[href*="programSearchId"], a[href*="asProgramDetailAction"]')
+        # 各プログラム行を抽出
+        links = page.query_selector_all(
+            'a[href*="programSearchId"], a[href*="asProgramDetailAction"], a[href*="programDetail"]'
+        )
         for link in links:
             try:
                 name = link.inner_text().strip()
                 href = link.get_attribute("href") or ""
                 if not name or len(name) < 2 or len(name) > 80:
                     continue
-                # プログラムIDをURLから抽出（programSearchId=xxxxxx）
+                # プログラムIDをURLから抽出
                 m = re.search(r"programSearchId=(\d+)", href)
                 pid = m.group(1) if m else None
                 if not pid:
-                    m2 = re.search(r"s(\d{8})", href)
+                    m2 = re.search(r"[?&]a8mat=([^&]+)", href)
                     if m2:
                         pid = m2.group(1)
+                if not pid:
+                    m3 = re.search(r"/(\d{8,})", href)
+                    if m3:
+                        pid = m3.group(1)
                 if pid and not any(p["id"] == pid for p in programs):
                     programs.append({"id": pid, "name": name, "detail_href": href})
             except Exception:
@@ -162,9 +216,11 @@ def main():
         print(f"A8_COOKIES のJSONパースに失敗: {e}")
         sys.exit(1)
 
+    # ローカル実行時は HEADLESS=false で起動可能
+    headless = os.environ.get("HEADLESS", "true").lower() != "false"
     with sync_playwright() as p:
         browser = p.chromium.launch(
-            headless=True,
+            headless=headless,
             args=[
                 "--no-sandbox",
                 "--disable-dev-shm-usage",
