@@ -137,6 +137,14 @@ def fetch_partner_programs(page) -> list[dict]:
         links = page.query_selector_all(
             'a[href*="programSearchId"], a[href*="asProgramDetailAction"], a[href*="programDetail"]'
         )
+        print(f"  デバッグ: リンク {len(links)} 件のhref/textを表示")
+        for i, link in enumerate(links):
+            try:
+                href = link.get_attribute("href") or ""
+                text = link.inner_text().strip()
+                print(f"    [{i}] text='{text[:40]}' href='{href[:120]}'")
+            except Exception:
+                pass
         for link in links:
             try:
                 name = link.inner_text().strip()
